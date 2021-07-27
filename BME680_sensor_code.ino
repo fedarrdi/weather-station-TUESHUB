@@ -3,28 +3,21 @@
 #include <Adafruit_Sensor.h>
 #include "Adafruit_BME680.h"
 
-/*#define BME_SCK 13
-#define BME_MISO 12
-#define BME_MOSI 11
-#define BME_CS 10*/
-
 #define SEALEVELPRESSURE_HPA (1013.25)
+Adafruit_BME680 bme;
 
-Adafruit_BME680 bme; // I2C
-//Adafruit_BME680 bme(BME_CS); // hardware SPI
-//Adafruit_BME680 bme(BME_CS, BME_MOSI, BME_MISO, BME_SCK);
 
-void setup() {
-  Serial.begin(115200);// da se chete na 9600
-  while (!Serial);
+void setUp_BME680()
+{
+  
   Serial.println(F("BME680 async test"));
-
-  if (!bme.begin()) {
+  
+  if (!bme.begin()) 
+  {
     Serial.println(F("Could not find a valid BME680 sensor, check wiring!"));
     while (1);
   }
-
-  // Set up oversampling and filter initialization
+  
   bme.setTemperatureOversampling(BME680_OS_8X);
   bme.setHumidityOversampling(BME680_OS_2X);
   bme.setPressureOversampling(BME680_OS_4X);
@@ -32,10 +25,11 @@ void setup() {
   bme.setGasHeater(320, 150); // 320*C for 150 ms
 }
 
-void loop() {
-  // Tell BME680 to begin measurement.
+void printResults_BME680()
+{
   unsigned long endTime = bme.beginReading();
-  if (endTime == 0) {
+  if (endTime == 0) 
+  {
     Serial.println(F("Failed to begin reading :("));
     return;
   }
@@ -45,13 +39,8 @@ void loop() {
   Serial.println(endTime);
 
   Serial.println(F("You can do other work during BME680 measurement."));
-  delay(50); // This represents parallel work.
-  // There's no need to delay() until millis() >= endTime: bme.endReading()
-  // takes care of that. It's okay for parallel work to take longer than
-  // BME680's measurement time.
-
-  // Obtain measurement results from BME680. Note that this operation isn't
-  // instantaneous even if milli() >= endTime due to I2C/SPI latency.
+  delay(50);
+  
   if (!bme.endReading()) {
     Serial.println(F("Failed to complete reading :("));
     return;
@@ -80,5 +69,18 @@ void loop() {
   Serial.println(F(" m"));
 
   Serial.println();
+}
+
+void setup() 
+{
+  Serial.begin(115200);
+  while (!Serial);
+
+  setUp_BME680();
+}
+
+void loop() 
+{
+  printResults_BME680();
   delay(2000);
 }
