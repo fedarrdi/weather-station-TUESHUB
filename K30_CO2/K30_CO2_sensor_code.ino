@@ -1,4 +1,4 @@
-include <Arduino.h>
+#include <Arduino.h>
 #include <Wire.h>
 #include "K30_I2C.h"
 
@@ -32,5 +32,4 @@ void loop()
   Serial.println("\n"); 
   delay(3000);
 }
-
 
