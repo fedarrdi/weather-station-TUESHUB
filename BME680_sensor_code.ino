@@ -1,86 +1,117 @@
-#include <Wire.h>
-#include <SPI.h>
-#include <Adafruit_Sensor.h>
-#include "Adafruit_BME680.h"
+include <Arduino.h>
+#include "bsec.h"
 
-#define SEALEVELPRESSURE_HPA (1013.25)
-Adafruit_BME680 bme;
+// Helper functions declarations
+void checkIaqSensorStatus(void);
+void errLeds(void);
 
+// Create an object of the class Bsec
+Bsec iaqSensor;
 
-void setUp_BME680()
-{
-  
-  Serial.println(F("BME680 async test"));
-  
-  if (!bme.begin()) 
-  {
-    Serial.println(F("Could not find a valid BME680 sensor, check wiring!"));
-    while (1);
-  }
-  
-  bme.setTemperatureOversampling(BME680_OS_8X);
-  bme.setHumidityOversampling(BME680_OS_2X);
-  bme.setPressureOversampling(BME680_OS_4X);
-  bme.setIIRFilterSize(BME680_FILTER_SIZE_3);
-  bme.setGasHeater(320, 150); // 320*C for 150 ms
-}
+String output;
 
-void printResults_BME680()
-{
-  unsigned long endTime = bme.beginReading();
-  if (endTime == 0) 
-  {
-    Serial.println(F("Failed to begin reading :("));
-    return;
-  }
-  Serial.print(F("Reading started at "));
-  Serial.print(millis());
-  Serial.print(F(" and will finish at "));
-  Serial.println(endTime);
-
-  Serial.println(F("You can do other work during BME680 measurement."));
-  delay(50);
-  
-  if (!bme.endReading()) {
-    Serial.println(F("Failed to complete reading :("));
-    return;
-  }
-  Serial.print(F("Reading completed at "));
-  Serial.println(millis());
-
-  Serial.print(F("Temperature = "));
-  Serial.print(bme.temperature);
-  Serial.println(F(" *C"));
-
-  Serial.print(F("Pressure = "));
-  Serial.print(bme.pressure / 100.0);
-  Serial.println(F(" hPa"));
-
-  Serial.print(F("Humidity = "));
-  Serial.print(bme.humidity);
-  Serial.println(F(" %"));
-
-  Serial.print(F("Gas = "));
-  Serial.print(bme.gas_resistance / 1000.0);
-  Serial.println(F(" KOhms"));
-
-  Serial.print(F("Approx. Altitude = "));
-  Serial.print(bme.readAltitude(SEALEVELPRESSURE_HPA));
-  Serial.println(F(" m"));
-
-  Serial.println();
-}
-
-void setup() 
+// Entry point for the example
+void setup(void)
 {
   Serial.begin(115200);
-  while (!Serial);
+  Wire.begin();
 
-  setUp_BME680();
+  iaqSensor.begin(BME680_I2C_ADDR_SECONDARY, Wire);
+  output = "\nBSEC library version " + String(iaqSensor.version.major) + "." + String(iaqSensor.version.minor) + "." + String(iaqSensor.version.major_bugfix) + "." + String(iaqSensor.version.minor_bugfix);
+  Serial.println(output);
+  checkIaqSensorStatus();
+
+  bsec_virtual_sensor_t sensorList[10] = {
+    BSEC_OUTPUT_RAW_TEMPERATURE,
+    BSEC_OUTPUT_RAW_PRESSURE,
+    BSEC_OUTPUT_RAW_HUMIDITY,
+    BSEC_OUTPUT_RAW_GAS,
+    BSEC_OUTPUT_IAQ,
+    BSEC_OUTPUT_STATIC_IAQ,
+    BSEC_OUTPUT_CO2_EQUIVALENT,
+    BSEC_OUTPUT_BREATH_VOC_EQUIVALENT,
+    BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_TEMPERATURE,
+    BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY,
+  };
+
+  iaqSensor.updateSubscription(sensorList, 10, BSEC_SAMPLE_RATE_LP);
+  checkIaqSensorStatus();
+
+  // Print the header
+  output = "Timestamp [ms], raw temperature [°C], pressure [hPa], raw relative humidity [%], gas [Ohm], IAQ, IAQ accuracy, temperature [°C], relative humidity [%], Static IAQ, CO2 equivalent, breath VOC equivalent";
+  Serial.println(output);
 }
 
-void loop() 
+// Function that is looped forever
+void loop(void)
 {
-  printResults_BME680();
-  delay(2000);
+  unsigned long time_trigger = millis();
+  if (iaqSensor.run()) { // If new data is available
+    output = "Time from start: " + String(time_trigger);
+    output += "\n";
+    output += "Raw temp: " + String(iaqSensor.rawTemperature);
+    output += "\n";
+    output += "Pressure: " + String(iaqSensor.pressure);
+    output += "\n";
+    output += "Raw humidity:" + String(iaqSensor.rawHumidity);
+    output += "\n";
+    output += "Gas resistance: " + String(iaqSensor.gasResistance);
+    output += "\n";
+    output += "iaq: " + String(iaqSensor.iaq);
+    output += "\n";
+    output += "iaqAccuracy: " + String(iaqSensor.iaqAccuracy);
+    output += "\n";
+    output += "Temperature: " + String(iaqSensor.temperature);
+    output += "\n";
+    output += "himidity: " + String(iaqSensor.humidity);
+    output += "\n";
+    output += "staticIaq: " + String(iaqSensor.staticIaq);
+    output += "\n";
+    output += "co2Equivalent " + String(iaqSensor.co2Equivalent);
+    output += "\n";
+    output += "breathVocEquivalent " + String(iaqSensor.breathVocEquivalent);
+    output += "\n";
+    output += "\n";
+    output += "\n";
+    Serial.println(output);
+  } else {
+    checkIaqSensorStatus();
+  }
+}
+
+// Helper function definitions
+void checkIaqSensorStatus(void)
+{
+  if (iaqSensor.status != BSEC_OK) {
+    if (iaqSensor.status < BSEC_OK) {
+      output = "BSEC error code : " + String(iaqSensor.status);
+      Serial.println(output);
+      for (;;)
+        errLeds(); /* Halt in case of failure */
+    } else {
+      output = "BSEC warning code : " + String(iaqSensor.status);
+      Serial.println(output);
+    }
+  }
+
+  if (iaqSensor.bme680Status != BME680_OK) {
+    if (iaqSensor.bme680Status < BME680_OK) {
+      output = "BME680 error code : " + String(iaqSensor.bme680Status);
+      Serial.println(output);
+      for (;;)
+        errLeds(); /* Halt in case of failure */
+    } else {
+      output = "BME680 warning code : " + String(iaqSensor.bme680Status);
+      Serial.println(output);
+    }
+  }
+}
+
+void errLeds(void)
+{
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(100);
+  digitalWrite(LED_BUILTIN, LOW);
+  delay(100);
 }
