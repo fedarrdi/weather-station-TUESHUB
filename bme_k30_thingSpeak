@@ -1,0 +1,258 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include "ThingSpeak.h"
+#include <Wire.h>
+#include "bsec.h"
+
+
+const char* ssid = "HUAWEI Y7 2019";   // your network SSID (name) 
+
+const char* password = "parola9876";   // your network password
+
+WiFiClient  client;
+
+//=================================k30=================================
+
+unsigned long myChannelNumber_k30 = 2;
+const char * myWriteAPIKey_k30 = "C33TOKBJLG8PP4SS";
+
+
+//===================================BME===============================
+unsigned long myChannelNumber_bme = 1;
+const char * myWriteAPIKey_bme = "JKJ803U5KEL7T07H";
+
+void checkIaqSensorStatus(void);
+void errLeds(void);
+void update_output(void);
+void put_in_thingspeak(void);
+
+Bsec iaqSensor;                           // Create an object of the class Bsec
+String output;                            //ouput string with the sensor data
+
+///====================================================================
+
+unsigned long lastTime = 0;
+unsigned long timerDelay = 30000;
+
+
+int co2Addr = 0x68;
+void setup() 
+{
+  Serial.begin(115200);
+  WiFi.mode(WIFI_STA);
+  Wire.begin ();
+  ThingSpeak.begin(client);
+  iaqSensor.begin(BME680_I2C_ADDR_SECONDARY, Wire);
+  output = "\nBSEC library version " + String(iaqSensor.version.major) + "." + String(iaqSensor.version.minor) + "." + String(iaqSensor.version.major_bugfix) + "." + String(iaqSensor.version.minor_bugfix);
+    Serial.println(output);
+    checkIaqSensorStatus();
+    bsec_virtual_sensor_t sensorList[10] = {
+            BSEC_OUTPUT_RAW_TEMPERATURE,
+            BSEC_OUTPUT_RAW_PRESSURE,
+            BSEC_OUTPUT_RAW_HUMIDITY,
+            BSEC_OUTPUT_RAW_GAS,
+            BSEC_OUTPUT_IAQ,
+            BSEC_OUTPUT_STATIC_IAQ,
+            BSEC_OUTPUT_CO2_EQUIVALENT,
+            BSEC_OUTPUT_BREATH_VOC_EQUIVALENT,
+            BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_TEMPERATURE,
+            BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY,
+    };
+    iaqSensor.updateSubscription(sensorList, 10, BSEC_SAMPLE_RATE_LP);
+    checkIaqSensorStatus();
+  pinMode(13, OUTPUT); // address of the Arduino LED indicator
+  Serial.println("Application Note AN-102: Interface Arduino to K-30");
+}
+
+
+void update_output()
+{
+  //output = String(time_trigger);
+  output += String(iaqSensor.rawTemperature);
+  output += String(iaqSensor.pressure);
+  output += String(iaqSensor.rawHumidity);
+  output += String(iaqSensor.gasResistance);
+  output += String(iaqSensor.iaq);
+  output += String(iaqSensor.iaqAccuracy);
+  output += String(iaqSensor.temperature);
+  output += String(iaqSensor.humidity);
+  output += String(iaqSensor.staticIaq);
+  output += String(iaqSensor.co2Equivalent);
+  output += String(iaqSensor.breathVocEquivalent);
+  Serial.println(output);
+}
+
+void put_in_thingspeak()
+{
+    //float time = (time_trigger);
+    //float rawTemperature = (iaqSensor.rawTemperature);
+    float pressure = (iaqSensor.pressure);
+    //float rawHumidity = (iaqSensor.rawHumidity);
+    float gasResistance = (iaqSensor.gasResistance);
+    float iaq = (iaqSensor.iaq);
+    //float iaqAccuracy = (iaqSensor.iaqAccuracy);
+    float temperature = (iaqSensor.temperature);
+    float humidity = (iaqSensor.humidity);
+    float staticIaq = (iaqSensor.staticIaq);
+    float co2Equivalent = (iaqSensor.co2Equivalent);
+    float breathVocEquivalent = (iaqSensor.breathVocEquivalent);
+
+    ThingSpeak.setField(1, pressure);
+    ThingSpeak.setField(2, gasResistance);
+    ThingSpeak.setField(3, iaq);
+    ThingSpeak.setField(4, temperature);
+    ThingSpeak.setField(5, humidity);
+    ThingSpeak.setField(6, staticIaq);
+    ThingSpeak.setField(7, co2Equivalent);
+    ThingSpeak.setField(8, breathVocEquivalent);
+
+    int x = ThingSpeak.writeFields(myChannelNumber_bme, myWriteAPIKey_bme);
+
+    if(x == 200)
+        Serial.println("Channel update successful.");
+    else
+        Serial.println("Problem updating channel. HTTP error code " + String(x));
+}
+
+int readCO2()
+{
+  int co2_value = 0;  // We will store the CO2 value inside this variable.
+
+  digitalWrite(13, HIGH);  // turn on LED
+
+  Wire.beginTransmission(co2Addr);
+  Wire.write(0x22);
+  Wire.write(0x00);
+  Wire.write(0x08);
+  Wire.write(0x2A);
+
+  Wire.endTransmission();
+  delay(10);
+
+  Wire.requestFrom(co2Addr, 4);
+
+  byte i = 0;
+  byte buffer[4] = {0, 0, 0, 0};
+
+  while (Wire.available())
+  {
+    buffer[i] = Wire.read();
+    i++;
+  }
+
+  co2_value = 0;
+  co2_value |= buffer[1] & 0xFF;
+  co2_value = co2_value << 8;
+  co2_value |= buffer[2] & 0xFF;
+
+
+  byte sum = 0; //Checksum Byte
+  sum = buffer[0] + buffer[1] + buffer[2]; //Byte addition utilizes overflow
+
+  if (sum == buffer[3])
+  {
+    // Success!
+    digitalWrite(13, LOW);
+    return co2_value;
+  }
+  else
+  {
+    digitalWrite(13, LOW);
+    return 0;
+  }
+}
+
+void loop() 
+{
+    if(WiFi.status() != WL_CONNECTED)
+    {
+      Serial.print("Attempting to connect");
+      while(WiFi.status() != WL_CONNECTED)
+      {
+        WiFi.begin(ssid, password); 
+        delay(5000);     
+      } 
+      Serial.println("\nConnected.");
+    }
+
+    //===============================================k30============================
+    float co2Value = readCO2();
+    if (co2Value > 0)
+    {
+        Serial.print("CO2 Value: ");
+        Serial.println(co2Value);
+
+        int x = ThingSpeak.writeField(myChannelNumber_k30, 1, co2Value, myWriteAPIKey_k30);
+        if(x == 200)
+            Serial.println("Channel update successful.");
+
+        else
+            Serial.println("Problem updating channel. HTTP error code " + String(x)); 
+
+    }
+    else
+    {
+        Serial.println("Checksum failed / Communication failure");
+    }
+
+    //===========================================bme================================
+    if (iaqSensor.run())
+    {
+        update_output();
+        put_in_thingspeak();
+    }
+    else
+    {
+        checkIaqSensorStatus();
+    }
+
+    delay(2000);
+}
+
+//==========================================bme===================================
+void checkIaqSensorStatus(void)
+{
+    if (iaqSensor.status != BSEC_OK)
+    {
+        if (iaqSensor.status < BSEC_OK)
+        {
+            output = "BSEC error code : " + String(iaqSensor.status);
+            Serial.println(output);
+            for (;;)
+                errLeds(); /* Halt in case of failure */
+        }
+        else
+        {
+            output = "BSEC warning code : " + String(iaqSensor.status);
+            Serial.println(output);
+        }
+    }
+
+    if (iaqSensor.bme680Status != BME680_OK)
+    {
+        if (iaqSensor.bme680Status < BME680_OK)
+        {
+            output = "BME680 error code : " + String(iaqSensor.bme680Status);
+            Serial.println(output);
+            for (;;) /* Halt in case of failure */
+            {
+                errLeds();
+            }
+        }
+        else
+        {
+            output = "BME680 warning code : " + String(iaqSensor.bme680Status);
+            Serial.println(output);
+        }
+    }
+}
+
+void errLeds(void)
+{
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(250);
+    digitalWrite(LED_BUILTIN, LOW);
+    delay(250);
+}
+
